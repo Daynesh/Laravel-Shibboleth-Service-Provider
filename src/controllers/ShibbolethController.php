@@ -87,9 +87,9 @@ class ShibbolethController extends Controller {
                 try{
                     $group = Group::whereHas('users', function($q){
                         $q->where('email', '=', Request::server(Config::get("$this->cpath.idp_login_email")));
-                    })->first();
+                    })->get();
 
-                    Session::put('group', $group->name);
+                    Session::put('group', $group);
                 }catch(Exception $e){ // TODO: Remove later after all auth is set up.
                     Session::put('group', 'undefined');
                 }
@@ -139,9 +139,9 @@ class ShibbolethController extends Controller {
                 {
                     $group = Group::whereHas('users', function($q){
                         $q->where('email', '=', $this->getServerVariable(Config::get("$this->cpath.idp_login_email")));
-                    })->first();
+                    })->get();
 
-                    Session::put('group', $group->name);
+                    Session::put('group', $group);
                 }
                 catch(Exception $e)
                 { // TODO: Remove later after all auth is set up.
