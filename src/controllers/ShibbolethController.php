@@ -9,8 +9,8 @@ use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\View;
 
-class ShibbolethController extends Controller {
-
+class ShibbolethController extends Controller 
+{
 	//Config pathings
 	private $cpath   = "shibboleth::shibboleth";
 	private $ctrpath = "Saitswebuwm\\Shibboleth\\ShibbolethController@";
@@ -22,7 +22,8 @@ class ShibbolethController extends Controller {
 	/**
 	 * Inject the user into this controller if present.
 	 */
-	public function __construct(GenericUser $user = null) {
+	public function __construct(GenericUser $user = null) 
+	{
 		if (Config::get("$this->cpath.emulate_idp") == true) {
 			$this->config         = new \Shibalike\Config();
 			$this->config->idpUrl = 'idp';
@@ -42,7 +43,8 @@ class ShibbolethController extends Controller {
 	 * Create the session, send the user away to the IDP
 	 * for authentication.
 	 */
-	public function create() {
+	public function create() 
+	{
 		if (Config::get("$this->cpath.emulate_idp") == true) {
 			return Redirect::to(action($this->ctrpath . 'emulateLogin') . '?target=' . action($this->ctrpath . "idpAuthorize"));
 		} else {
@@ -53,14 +55,18 @@ class ShibbolethController extends Controller {
 	/**
 	 * Login for users not using the IDP
 	 */
-	public function localCreate() {
-		return View::make(Config::get("$this->cpath.login_view"));
+	// TODO: Local users are not implemented properly.
+	public function localCreate() 
+	{
+		return $this->viewOrRedirect(Config::get("$this->cpath.login_view"));
 	}
 
 	/**
 	 * Authorize function for users not using the IdP
 	 */
-	public function localAuthorize() {
+	// TODO: Local users are not implemented properly.
+	public function localAuthorize() 
+	{
 		$email    = \Input::get(Config::get("$this->cpath.local_login_user_field"));
 		$password = \Input::get(Config::get("$this->cpath.local_login_pass_field"));
 
@@ -99,24 +105,27 @@ class ShibbolethController extends Controller {
 
 			//Set session to know user is local
 			Session::put('auth_type', 'local');
-			return View::make('/local_landing');
+			return $this->viewOrRedirect('/local_landing');
 		} else {
-			return View::make(Config::get("$this->cpath.login_fail"));
+			return $this->viewOrRedirect(Config::get("$this->cpath.login_fail"));
 		}
 	}
 
 	/**
 	 * Local user landing page
 	 */
-	public function local_landing() {
-		return View::make(Config::get("$this->cpath.default_view"));
+	// TODO: Local users are not implemented properly.
+	public function local_landing() 
+	{
+		return $this->viewOrRedirect(Config::get("$this->cpath.default_view"));
 	}
 
 	/**
 	 * Setup authorization based on returned server variables
 	 * from the IdP.
 	 */
-	public function idpAuthorize() {
+	public function idpAuthorize() 
+	{
 		$email      = $this->getServerVariable(Config::get("$this->cpath.idp_login_email"));
 		$first_name = $this->getServerVariable(Config::get("$this->cpath.idp_login_first"));
 		$last_name  = $this->getServerVariable(Config::get("$this->cpath.idp_login_last"));
@@ -124,42 +133,37 @@ class ShibbolethController extends Controller {
 		// Attempt to login with the email, if success, update the user model
 		// with data from the Shibboleth headers (if present)
 		if (Auth::attempt(array('email' => $email), true)) {
-			if (isset($first_name)) {
-				Session::put('first', $first_name);
-			}
+			$user = UserShibboleth::where('email', '=', $email)->first();
 
-			if (isset($last_name)) {
-				Session::put('last', $last_name);
-			}
+			// Update the modal as necessary
+			if (isset($first_name)) $user->first_name = $first_name;
+			if (isset($last_name)) $user->last_name = $last_name;
+			$user->save();
 
-			if (isset($email)) {
-				Session::put('email', $email);
-			}
-
-			if (isset($email)) {
-				Session::put('id', UserShibboleth::where('email', '=', $email)->first()->id);
-			}
-			//TODO: Check this
-
-			//Group Session Field
-			if (isset($email)) {
-				try
-				{
-					$group = Group::whereHas('users', function ($q) {
-						$q->where('email', '=', $this->getServerVariable(Config::get("$this->cpath.idp_login_email")));
-					})->first();
-
-					Session::put('group', $group->name);
-				} catch (Exception $e) {
-					// TODO: Remove later after all auth is set up.
-					Session::put('group', 'undefined');
-				}
-			}
-
-			//Set session to know user is idp
+			// Populate the session as needed
+			Session::put('first', $user->first_name);
+			Session::put('last', $user->last_name);
+			Session::put('email', $user->email);
+			Session::put('id', $user->id);
 			Session::put('auth_type', 'idp');
 
-			//Check if route exists else redirect
+			// Now let's handle groups
+			$groups = $user->groups->toArray();
+
+			// For all groups
+			Session::put('groups', $groups);
+
+			// Handle situations where we just want one group info
+			if (count($groups) > 0) {
+				// For single groups, or the "Primary" group
+                Session::put('group_id', $groups[0]['id']);
+                Session::put('group_name', $groups[0]['name']);
+                // Backwards compatibility
+                Session::put('group', $groups[0]['name']);
+			} else {
+				Session::put('group', 'undefined');
+			}
+
 			return $this->viewOrRedirect(Config::get("$this->cpath.shibboleth_view"));
 
 		} else {
@@ -189,18 +193,23 @@ class ShibbolethController extends Controller {
 				}
 			}
 
-			return View::make(Config::get("$this->cpath.login_fail"));
+			return $this->viewOrRedirect(Config::get("$this->cpath.login_fail"));
 		}
 	}
 
-	public function idp_landing() {
-		return View::make(Config::get("$this->cpath.shibboleth_view"));
+	/**
+	 * Go to the landing page for Shibboleth
+	 */
+	public function idp_landing() 
+	{
+		return $this->viewOrRedirect(Config::get("$this->cpath.shibboleth_view"));
 	}
 
 	/**
 	 * Get current information about the session.
 	 */
-	public function session() {
+	public function session() 
+	{
 		echo 'Logged In: ' . ((Auth::check()) ? 'yes' : 'no') . '<br />';
 		echo 'Session Information: <br />' . var_dump(Session::all());
 	}
@@ -208,7 +217,8 @@ class ShibbolethController extends Controller {
 	/**
 	 * Destroy the current session and log the user out, redirect them to the main route.
 	 */
-	public function destroy() {
+	public function destroy() 
+	{
 		Auth::logout();
 
 		if (Session::get('auth_type') == 'idp') {
@@ -221,35 +231,35 @@ class ShibbolethController extends Controller {
 			}
 		} else {
 			Session::flush();
-			return View::make(Config::get("$this->cpath.local_logout"));
+			return $this->viewOrRedirect(Config::get("$this->cpath.local_logout"));
 		}
 	}
 
-	function getAttrStore() {
-		return new \Shibalike\Attr\Store\ArrayStore(Config::get("$this->cpath.emulate_idp_users"));
-	}
-
-	function getStateManager() {
-		$session = \UserlandSession\SessionBuilder::instance()
-			->setSavePath(sys_get_temp_dir())
-			->setName('SHIBALIKE_BASIC')
-			->build();
-		return new \Shibalike\StateManager\UserlandSession($session);
-	}
-
-	public function emulateLogin() {
+	/**
+	 * Emulate a login via Shibalike
+	 */
+	public function emulateLogin() 
+	{
 		$from = (Request::get('target') != null) ? Request::get('target') : $this->getServerVariable('HTTP_REFERER');
 
 		$this->sp->makeAuthRequest($from);
 		$this->sp->redirect();
 	}
 
-	public function emulateLogout() {
+	/**
+	 * Emulate a logout via Shibalike
+	 */
+	public function emulateLogout() 
+	{
 		$this->sp->logout();
 		die('Goodbye, fair user. <a href="' . $this->getServerVariable('HTTP_REFERER') . '">Return from whence you came</a>!');
 	}
 
-	public function emulateIdp() {
+	/**
+	 * Emulate the 'authorization' via Shibalike
+	 */
+	public function emulateIdp() 
+	{
 		if (Request::get('username') != null) {
 			$username = '';
 			if (Request::get('username') === Request::get('password')) {
@@ -265,15 +275,37 @@ class ShibbolethController extends Controller {
 			}
 		}
 		?>
-			<form action="" method="post">
-				<dl>
-					<dt>Username</dt><dd><input size="20" name="username"></dd>
-					<dt>Password</dt><dd><input size="20" name="password" type="password"></dd>
-				</dl>
-				<p><input type="submit" value="Login"></p>
-			</form>
+		<form action="" method="post">
+			<dl>
+				<dt>Username</dt>
+				<dd><input size="20" name="username"></dd>
+				<dt>Password</dt>
+				<dd><input size="20" name="password" type="password"></dd>
+			</dl>
+			<p><input type="submit" value="Login"></p>
+		</form>
 		<?php
-}
+	}
+
+	/**
+	 * Function to get an attribute store for Shibalike
+	 */
+	private function getAttrStore() 
+	{
+		return new \Shibalike\Attr\Store\ArrayStore(Config::get("$this->cpath.emulate_idp_users"));
+	}
+
+	/**
+	 * Gets a state manager for Shibalike
+	 */
+	private function getStateManager() 
+	{
+		$session = \UserlandSession\SessionBuilder::instance()
+			->setSavePath(sys_get_temp_dir())
+			->setName('SHIBALIKE_BASIC')
+			->build();
+		return new \Shibalike\StateManager\UserlandSession($session);
+	}
 
 	/**
 	 * Wrapper function for getting server variables.
@@ -296,7 +328,6 @@ class ShibbolethController extends Controller {
 	 * simple function that allows config variables to
 	 * be either names of Views OR redirect routes
 	 */
-	// TODO: use this for all "view" variables
 	private function viewOrRedirect($view) {
 		if (View::exists($view)) {
 			return View::make($view);
